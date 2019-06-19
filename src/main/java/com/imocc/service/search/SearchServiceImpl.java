@@ -2,11 +2,16 @@ package com.imocc.service.search;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.collect.Lists;
 import com.imocc.entity.House;
+import com.imocc.entity.HouseDetail;
+import com.imocc.entity.HouseTag;
 import com.imocc.repository.HouseDetailRepository;
 import com.imocc.repository.HouseRepository;
 import com.imocc.repository.HouseTagRepository;
 import org.elasticsearch.action.index.IndexResponse;
+import org.elasticsearch.action.search.SearchRequestBuilder;
+import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.xcontent.XContentType;
@@ -22,6 +27,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Created by Administrator on 2018/1/14.
@@ -53,15 +61,58 @@ public class SearchServiceImpl implements ISearchService {
     private ObjectMapper objectMapper;
 
     @Override
-    public void index(Long houseId) {
+    public boolean index(Long houseId) {
         House house = houseRepository.findOne(houseId);
         if(house==null){
             LOGGER.error("Index house {} dose not exist!",houseId);
+            return false;
         }
         HouseIndexTemplate houseIndexTemplate=new HouseIndexTemplate();
         modelMapper.map(house,houseIndexTemplate);
 
-        //create
+        // 查询详情
+        HouseDetail houseDetail = houseDetailRepository.findByHouseId(houseId);
+        if (houseDetail == null) {
+            // TODO 异常
+            throw new NullPointerException();
+        }
+
+        modelMapper.map(houseDetail,houseIndexTemplate);
+
+        // 查询tag
+        List<HouseTag> houseTagList = tagRepository.findAllByHouseId(houseId);
+        if (!houseTagList.isEmpty()) {
+            ArrayList<String> tagStrings = Lists.newArrayList();
+            houseTagList.forEach(houseTag -> tagStrings.add(houseTag.getName()));
+            houseIndexTemplate.setTags(tagStrings);
+        }
+
+        // 查询索引是否存在
+        SearchRequestBuilder searchRequestBuilder = this.transportClient.prepareSearch(INDEX_NAME).setTypes(INDEX_TYPE)
+                .setQuery(QueryBuilders.termQuery(HouseIndexKey.HOUSE_ID, houseId));
+
+        LOGGER.debug(searchRequestBuilder.toString());
+
+        SearchResponse searchResponse = searchRequestBuilder.get();
+        // 获取总数
+        long totalHits = searchResponse.getHits().getTotalHits();
+
+        boolean success;
+        if (totalHits == 0) {
+            // create
+            success = create(houseIndexTemplate);
+        } else if (totalHits == 1) {
+            String esId = searchResponse.getHits().getAt(0).getId();
+            // update
+            success = update(esId, houseIndexTemplate);
+        } else {
+            success = deleteAndCreate(totalHits, houseIndexTemplate);
+        }
+
+        if (success) {
+            LOGGER.debug("Index success with house " + houseId);
+        }
+        return success;
     }
 
     /**
@@ -88,7 +139,7 @@ public class SearchServiceImpl implements ISearchService {
 
     /**
      * 修改
-     * @param esId
+     * @param esId id
      * @param houseIndexTemplate
      * @return
      */
@@ -115,7 +166,7 @@ public class SearchServiceImpl implements ISearchService {
      * @param houseIndexTemplate
      * @return
      */
-    public boolean deleteAndCreate(int totalHit,HouseIndexTemplate houseIndexTemplate){
+    public boolean deleteAndCreate(Long totalHit,HouseIndexTemplate houseIndexTemplate){
         DeleteByQueryRequestBuilder builder = DeleteByQueryAction.INSTANCE
                 .newRequestBuilder(transportClient)
                 .filter(QueryBuilders.termQuery(HouseIndexKey.HOUSE_ID, houseIndexTemplate.getHouseId()))
@@ -135,6 +186,15 @@ public class SearchServiceImpl implements ISearchService {
 
     @Override
     public void remove(Long houseId) {
+        DeleteByQueryRequestBuilder builder = DeleteByQueryAction.INSTANCE
+                .newRequestBuilder(transportClient)
+                .filter(QueryBuilders.termQuery(HouseIndexKey.HOUSE_ID, houseId))
+                .source(INDEX_NAME);
 
+        LOGGER.debug("Delete by query for house: " + builder);
+        BulkByScrollResponse scrollResponse = builder.get();
+        long deleted = scrollResponse.getDeleted();
+
+        LOGGER.debug("DELETE total "+ deleted);
     }
 }

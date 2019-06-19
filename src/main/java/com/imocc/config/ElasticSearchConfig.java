@@ -24,7 +24,7 @@ public class ElasticSearchConfig {
                 .put("client.transport.sniff", true)
                 .build();
         InetSocketTransportAddress master=new InetSocketTransportAddress(
-                InetAddress.getByName("192.168.189.129"),9300
+                InetAddress.getByName("192.168.188.34"),9300
         );
 
         TransportClient client=new PreBuiltTransportClient(settings)

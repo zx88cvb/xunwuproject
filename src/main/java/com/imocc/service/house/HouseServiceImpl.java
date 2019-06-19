@@ -10,6 +10,7 @@ import com.imocc.repository.*;
 import com.imocc.service.IHouseService;
 import com.imocc.service.ServiceMultiResult;
 import com.imocc.service.ServiceResult;
+import com.imocc.service.search.ISearchService;
 import com.imocc.web.controller.form.DatatableSearch;
 import com.imocc.web.controller.form.HouseForm;
 import com.imocc.web.controller.form.PhotoForm;
@@ -73,6 +74,9 @@ public class HouseServiceImpl implements IHouseService {
 
     @Resource
     private ModelMapper modelMapper;
+
+    @Autowired
+    private ISearchService searchService;
 
     /*@Value("${qiniu.cdn.prefix}")
     private String cdnPrefix;*/
@@ -237,9 +241,9 @@ public class HouseServiceImpl implements IHouseService {
         house.setLastUpdateTime(new Date());
         houseRepository.save(house);
 
-       /* if (house.getStatus() == HouseStatus.PASSES.getValue()) {
+        if (house.getStatus() == HouseStatus.PASSES.getValue()) {
             searchService.index(house.getId());
-        }*/
+        }
 
         return ServiceResult.success();
     }
@@ -333,6 +337,13 @@ public class HouseServiceImpl implements IHouseService {
         }
 
         houseRepository.updateStatus(id, status);
+
+        // 上架更新索引 其他情况删除索引
+        if (status == HouseStatus.PASSES.getValue()) {
+            searchService.index(id);
+        } else {
+            searchService.remove(id);
+        }
         return ServiceResult.success();
     }
 
