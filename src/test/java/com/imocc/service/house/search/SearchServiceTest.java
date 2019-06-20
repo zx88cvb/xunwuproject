@@ -17,8 +17,7 @@ public class SearchServiceTest extends XunwuProjectApplicationTests {
 
     @Test
     public void testIndex () {
-        boolean index = searchService.index(15L);
-        Assert.assertTrue(index);
+        searchService.index(15L);
     }
 
     @Test
