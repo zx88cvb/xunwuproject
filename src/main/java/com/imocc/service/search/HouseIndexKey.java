@@ -7,7 +7,7 @@ package com.imocc.service.search;
 public class HouseIndexKey {
     public static final String HOUSE_ID="houseId";
 
-    public static final String TITLE="titile";
+    public static final String TITLE="title";
     public static final String PRICE = "price";
     public static final String AREA = "area";
     public static final String CREATE_TIME = "createTime";

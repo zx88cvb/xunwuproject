@@ -347,8 +347,48 @@ public class HouseServiceImpl implements IHouseService {
         return ServiceResult.success();
     }
 
+    private List<HouseDTO> wrapperHouseResult(List<Long> houseIds) {
+        ArrayList<HouseDTO> result = Lists.newArrayList();
+
+        Map<Long, HouseDTO> houseDTOMap = Maps.newHashMap();
+        Iterable<House> houses = houseRepository.findAll(houseIds);
+        houses.forEach(house -> {
+            HouseDTO houseDTO = modelMapper.map(house, HouseDTO.class);
+            houseDTOMap.put(house.getId(), houseDTO);
+        });
+
+        wrapperHouseList(houseIds, houseDTOMap);
+
+        // 顺序
+        for (Long houseId: houseIds) {
+            result.add(houseDTOMap.get(houseId));
+        }
+
+        return result;
+    }
+
     @Override
     public ServiceMultiResult<HouseDTO> query(RentSearch rentSearch) {
+        if (rentSearch.getKeywords() != null && !rentSearch.getKeywords().isEmpty()) {
+            // 走es查询
+            ServiceMultiResult<Long> serviceMultiResult = searchService.query(rentSearch);
+            if (serviceMultiResult.getTotal() == 0) {
+                return new ServiceMultiResult<>(0, Lists.newArrayList());
+            }
+
+            return new ServiceMultiResult<>(serviceMultiResult.getTotal(),
+                    wrapperHouseResult(serviceMultiResult.getResult()));
+        }
+
+        return simpleQuery(rentSearch);
+    }
+
+    /**
+     * 走mysql查询
+     * @param rentSearch 条件
+     * @return HouseDTO
+     */
+    private ServiceMultiResult<HouseDTO> simpleQuery(RentSearch rentSearch) {
         Sort sort= HouseSort.generateSort(rentSearch.getOrderBy(),rentSearch.getOrderDirection());
         int page=rentSearch.getStart()/rentSearch.getSize();
         Pageable pageable=new PageRequest(page,rentSearch.getSize(),sort);

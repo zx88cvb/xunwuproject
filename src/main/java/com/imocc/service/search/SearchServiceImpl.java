@@ -3,24 +3,32 @@ package com.imocc.service.search;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
+import com.google.common.primitives.Longs;
+import com.imocc.base.HouseSort;
+import com.imocc.base.RentValueBlock;
 import com.imocc.entity.House;
 import com.imocc.entity.HouseDetail;
 import com.imocc.entity.HouseTag;
 import com.imocc.repository.HouseDetailRepository;
 import com.imocc.repository.HouseRepository;
 import com.imocc.repository.HouseTagRepository;
+import com.imocc.service.ServiceMultiResult;
+import com.imocc.web.controller.form.RentSearch;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.RangeQueryBuilder;
 import org.elasticsearch.index.reindex.BulkByScrollResponse;
 import org.elasticsearch.index.reindex.DeleteByQueryAction;
 import org.elasticsearch.index.reindex.DeleteByQueryRequestBuilder;
 import org.elasticsearch.rest.RestStatus;
+import org.elasticsearch.search.sort.SortOrder;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -274,6 +282,105 @@ public class SearchServiceImpl implements ISearchService {
     @Override
     public void remove(Long houseId) {
         remove(houseId, 0);
+    }
+
+    @Override
+    public ServiceMultiResult<Long> query(RentSearch rentSearch) {
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+        // 根据城市英文名
+        boolQueryBuilder.filter(QueryBuilders.termQuery(HouseIndexKey.CITY_EN_NAME, rentSearch.getCityEnName()));
+
+        // 根据地区英文名
+        if (rentSearch.getRegionEnName() != null && !"*".equals(rentSearch.getRegionEnName())) {
+            boolQueryBuilder.filter(QueryBuilders.termQuery(HouseIndexKey.REGION_EN_NAME, rentSearch.getRegionEnName()));
+        }
+
+        // 面积
+        RentValueBlock area = RentValueBlock.matchArea(rentSearch.getAreaBlock());
+
+        if (!RentValueBlock.ALL.equals(area)) {
+            // 范围查询
+            RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(HouseIndexKey.AREA);
+
+            if (area.getMax() > 0) {
+                rangeQueryBuilder.lte(area.getMax());
+            }
+
+            if (area.getMin() > 0) {
+                rangeQueryBuilder.gte(area.getMin());
+            }
+            boolQueryBuilder.filter(rangeQueryBuilder);
+
+        }
+
+        // 价格
+        RentValueBlock price = RentValueBlock.matchPrice(rentSearch.getPriceBlock());
+
+        if (!RentValueBlock.ALL.equals(price)) {
+            // 范围查询
+            RangeQueryBuilder rangeQueryBuilder = QueryBuilders.rangeQuery(HouseIndexKey.PRICE);
+
+            if (price.getMax() > 0) {
+                rangeQueryBuilder.lte(price.getMax());
+            }
+
+            if (price.getMin() > 0) {
+                rangeQueryBuilder.gte(price.getMin());
+            }
+            boolQueryBuilder.filter(rangeQueryBuilder);
+
+        }
+
+        // 朝向
+        if (rentSearch.getDirection() > 0) {
+            boolQueryBuilder.filter(
+                    QueryBuilders.termQuery(HouseIndexKey.DISTRICT, rentSearch.getDirection())
+            );
+        }
+
+        // 租赁方式
+        if (rentSearch.getRentWay() > -1) {
+            boolQueryBuilder.filter(
+                    QueryBuilders.termQuery(HouseIndexKey.RENT_WAY, rentSearch.getRentWay())
+            );
+        }
+
+        boolQueryBuilder.must(QueryBuilders.multiMatchQuery(rentSearch.getKeywords(),
+                HouseIndexKey.TITLE,
+                HouseIndexKey.TRAFFIC,
+                HouseIndexKey.DISTRICT,
+                HouseIndexKey.ROUND_SERVICE,
+                HouseIndexKey.SUBWAY_LINE_NAME,
+                HouseIndexKey.SUBWAY_STATION_NAME
+                ));
+
+        // 通过es查询
+        SearchRequestBuilder searchRequestBuilder = this.transportClient.prepareSearch(INDEX_NAME)
+                .setTypes(INDEX_TYPE)
+                .setQuery(boolQueryBuilder)
+                .addSort(
+                        HouseSort.getSortKey(rentSearch.getOrderBy()),
+                        SortOrder.fromString(rentSearch.getOrderDirection())
+                )
+                .setFrom(rentSearch.getStart())
+                .setSize(rentSearch.getSize());
+
+        LOGGER.debug(searchRequestBuilder.toString());
+
+        List<Long> houseIds = Lists.newArrayList();
+
+        // 获取查询结果
+        SearchResponse searchResponse = searchRequestBuilder.get();
+        if (searchResponse.status() != RestStatus.OK) {
+            LOGGER.warn("search status is not ok for:" + searchResponse);
+            return new ServiceMultiResult<>(0, houseIds);
+        }
+
+        // 将符合结果id存入list集合
+        searchResponse.getHits().forEach(hit -> {
+            houseIds.add(Longs.tryParse(String.valueOf(hit.getSource().get(HouseIndexKey.HOUSE_ID))));
+        });
+        return new ServiceMultiResult<>(searchResponse.getHits().totalHits, houseIds);
     }
 
     public void remove(Long houseId, int retry) {
