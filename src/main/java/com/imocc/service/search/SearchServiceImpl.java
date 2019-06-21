@@ -3,6 +3,7 @@ package com.imocc.service.search;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.imocc.base.HouseSort;
 import com.imocc.base.RentValueBlock;
@@ -13,7 +14,11 @@ import com.imocc.repository.HouseDetailRepository;
 import com.imocc.repository.HouseRepository;
 import com.imocc.repository.HouseTagRepository;
 import com.imocc.service.ServiceMultiResult;
+import com.imocc.service.ServiceResult;
 import com.imocc.web.controller.form.RentSearch;
+import org.elasticsearch.action.admin.indices.analyze.AnalyzeAction;
+import org.elasticsearch.action.admin.indices.analyze.AnalyzeRequestBuilder;
+import org.elasticsearch.action.admin.indices.analyze.AnalyzeResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
@@ -29,6 +34,11 @@ import org.elasticsearch.index.reindex.DeleteByQueryAction;
 import org.elasticsearch.index.reindex.DeleteByQueryRequestBuilder;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.sort.SortOrder;
+import org.elasticsearch.search.suggest.Suggest;
+import org.elasticsearch.search.suggest.SuggestBuilder;
+import org.elasticsearch.search.suggest.SuggestBuilders;
+import org.elasticsearch.search.suggest.completion.CompletionSuggestion;
+import org.elasticsearch.search.suggest.completion.CompletionSuggestionBuilder;
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +52,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Created by Administrator on 2018/1/14.
@@ -216,6 +227,11 @@ public class SearchServiceImpl implements ISearchService {
      * @return
      */
     private boolean create(HouseIndexTemplate houseIndexTemplate){
+        // suggest自动补全
+        if (!updateSuggest(houseIndexTemplate)){
+            return false;
+        }
+
         try {
             IndexResponse indexResponse = this.transportClient.prepareIndex(INDEX_NAME, INDEX_TYPE)
                     .setSource(objectMapper.writeValueAsBytes(houseIndexTemplate), XContentType.JSON)
@@ -239,6 +255,11 @@ public class SearchServiceImpl implements ISearchService {
      * @return
      */
     private boolean update(String esId,HouseIndexTemplate houseIndexTemplate){
+        // suggest自动补全
+        if (!updateSuggest(houseIndexTemplate)){
+            return false;
+        }
+
         try {
             UpdateResponse updateResponse = this.transportClient.prepareUpdate(INDEX_NAME, INDEX_TYPE,esId)
                     .setDoc(objectMapper.writeValueAsBytes(houseIndexTemplate), XContentType.JSON)
@@ -381,6 +402,88 @@ public class SearchServiceImpl implements ISearchService {
             houseIds.add(Longs.tryParse(String.valueOf(hit.getSource().get(HouseIndexKey.HOUSE_ID))));
         });
         return new ServiceMultiResult<>(searchResponse.getHits().totalHits, houseIds);
+    }
+
+    @Override
+    public ServiceResult<List<String>> suggest(String prefix) {
+        CompletionSuggestionBuilder suggestions = SuggestBuilders.completionSuggestion("suggests")
+                .prefix(prefix).size(5);
+
+        SuggestBuilder suggestBuilder = new SuggestBuilder();
+        suggestBuilder.addSuggestion("autocomplete", suggestions);
+
+        SearchRequestBuilder requestBuilder = this.transportClient.prepareSearch(INDEX_NAME)
+                .setTypes(INDEX_TYPE)
+                .suggest(suggestBuilder);
+
+        LOGGER.debug(requestBuilder.toString());
+
+        SearchResponse response = requestBuilder.get();
+        Suggest suggest = response.getSuggest();
+        Suggest.Suggestion result = suggest.getSuggestion("autocomplete");
+
+        int maxSuggest = 0;
+        Set<String> suggestSet = Sets.newHashSet();
+
+        for(Object term: result.getEntries()) {
+            if (term instanceof CompletionSuggestion.Entry) {
+                CompletionSuggestion.Entry item = (CompletionSuggestion.Entry) term;
+                if (item.getOptions().isEmpty()) {
+                    continue;
+                }
+
+                for(CompletionSuggestion.Entry.Option option: item.getOptions()) {
+                    String tip = option.getText().string();
+                    if (suggestSet.contains(tip)) {
+                        continue;
+                    }
+                    suggestSet.add(tip);
+                    maxSuggest++;
+                }
+            }
+            if (maxSuggest > 5) {
+                break;
+            }
+        }
+        ArrayList<String> list = Lists.newArrayList(suggestSet.toArray(new String[]{}));
+        return ServiceResult.of(list);
+    }
+
+    private boolean updateSuggest(HouseIndexTemplate houseIndexTemplate){
+        AnalyzeRequestBuilder analyzeRequestBuilder =
+                new AnalyzeRequestBuilder(this.transportClient, AnalyzeAction.INSTANCE,INDEX_NAME,
+                        houseIndexTemplate.getTitle(),
+                        houseIndexTemplate.getLayoutDesc(),
+                        houseIndexTemplate.getRoundService(),
+                        houseIndexTemplate.getSubwayLineName(),
+                        houseIndexTemplate.getSubwayLineName());
+
+        analyzeRequestBuilder.setAnalyzer("ik_smart");
+        AnalyzeResponse analyzeResponse = analyzeRequestBuilder.get();
+        List<AnalyzeResponse.AnalyzeToken> tokens = analyzeResponse.getTokens();
+
+        if (tokens == null) {
+            LOGGER.warn("Can not analyzer token for house: " + houseIndexTemplate.getHouseId());
+            return false;
+        }
+
+        List<HouseSuggest> suggests = Lists.newArrayList();
+        for (AnalyzeResponse.AnalyzeToken token: tokens) {
+            // 排除数字类型 & 小于2个字符的分词
+            if ("<NUM>".equals(token.getType()) || token.getTerm().length() < 2) {
+                continue;
+            }
+            HouseSuggest houseSuggest = new HouseSuggest();
+            houseSuggest.setInput(token.getTerm());
+            suggests.add(houseSuggest);
+        }
+        // 定制化小区自动补全
+        HouseSuggest suggest = new HouseSuggest();
+        suggest.setInput(houseIndexTemplate.getDistrict());
+        suggests.add(suggest);
+
+        houseIndexTemplate.setSuggests(suggests);
+        return true;
     }
 
     public void remove(Long houseId, int retry) {

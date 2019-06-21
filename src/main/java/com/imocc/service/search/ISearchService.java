@@ -1,7 +1,10 @@
 package com.imocc.service.search;
 
 import com.imocc.service.ServiceMultiResult;
+import com.imocc.service.ServiceResult;
 import com.imocc.web.controller.form.RentSearch;
+
+import java.util.List;
 
 /**
  * Created by Administrator on 2018/1/14.
@@ -27,4 +30,11 @@ public interface ISearchService {
      * @return id
      */
     ServiceMultiResult<Long> query(RentSearch rentSearch);
+
+    /**
+     * 自动补全
+     * @param prefix 前缀文本
+     * @return 字符串集合
+     */
+    ServiceResult<List<String>> suggest(String prefix);
 }

@@ -5,7 +5,9 @@ import com.imocc.base.ApiResponse;
 import com.imocc.base.RentValueBlock;
 import com.imocc.entity.SupportAddress;
 import com.imocc.service.*;
+import com.imocc.service.search.ISearchService;
 import com.imocc.web.controller.form.RentSearch;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -28,6 +30,23 @@ public class HouseController {
     private IHouseService iHouseService;
     @Resource
     private IUserService iUserService;
+    @Autowired
+    private ISearchService iSearchService;
+
+    /**
+     * 自动补全接口
+     * @param prefix 输入前缀
+     * @return List结果
+     */
+    @GetMapping("rent/house/autocomplete")
+    @ResponseBody
+    public ApiResponse autocomplete(String prefix) {
+        if (prefix.isEmpty()) {
+            return ApiResponse.ofStatus(ApiResponse.Status.BAD_REQUEST);
+        }
+        ServiceResult<List<String>> result = iSearchService.suggest(prefix);
+        return ApiResponse.ofSuccess(result.getResult());
+    }
 
     @GetMapping("address/support/cities")
     @ResponseBody
