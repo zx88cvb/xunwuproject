@@ -33,6 +33,10 @@ import org.elasticsearch.index.reindex.BulkByScrollResponse;
 import org.elasticsearch.index.reindex.DeleteByQueryAction;
 import org.elasticsearch.index.reindex.DeleteByQueryRequestBuilder;
 import org.elasticsearch.rest.RestStatus;
+import org.elasticsearch.search.aggregations.Aggregation;
+import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.sort.SortOrder;
 import org.elasticsearch.search.suggest.Suggest;
 import org.elasticsearch.search.suggest.SuggestBuilder;
@@ -447,6 +451,33 @@ public class SearchServiceImpl implements ISearchService {
         }
         ArrayList<String> list = Lists.newArrayList(suggestSet.toArray(new String[]{}));
         return ServiceResult.of(list);
+    }
+
+    @Override
+    public ServiceResult<Long> aggregateDistrictHouse(String cityEnName, String regionEnName, String district) {
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery()
+                .filter(QueryBuilders.termQuery(HouseIndexKey.CITY_EN_NAME, cityEnName))
+                .filter(QueryBuilders.termQuery(HouseIndexKey.REGION_EN_NAME, regionEnName))
+                .filter(QueryBuilders.termQuery(HouseIndexKey.DISTRICT,district));
+
+        SearchRequestBuilder requestBuilder = this.transportClient.prepareSearch(INDEX_NAME)
+                .setTypes(INDEX_TYPE)
+                .setQuery(boolQueryBuilder)
+                .addAggregation(AggregationBuilders.terms(HouseIndexKey.AGG_DISTRICT)
+                        .field(HouseIndexKey.DISTRICT))
+                .setSize(0);
+
+        LOGGER.debug(requestBuilder.toString());
+
+        SearchResponse searchResponse = requestBuilder.get();
+        if (searchResponse.status() == RestStatus.OK) {
+            Terms terms = searchResponse.getAggregations().get(HouseIndexKey.AGG_DISTRICT);
+            if (terms.getBuckets() != null && !terms.getBuckets().isEmpty()) {
+                return ServiceResult.of(terms.getBucketByKey(district).getDocCount());
+            }
+        }
+        LOGGER.warn("Failed to Addregate for "+ HouseIndexKey.AGG_DISTRICT);
+        return ServiceResult.of(0L);
     }
 
     private boolean updateSuggest(HouseIndexTemplate houseIndexTemplate){

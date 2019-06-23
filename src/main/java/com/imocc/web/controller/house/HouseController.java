@@ -176,8 +176,10 @@ public class HouseController {
         model.addAttribute("agent", userDTOServiceResult.getResult());
         model.addAttribute("house", houseDTO);
 
-
-        model.addAttribute("houseCountInDistrict", 0);
+        ServiceResult<Long> result = iSearchService.aggregateDistrictHouse(city.getEnName(),
+                region.getEnName(),
+                houseDTO.getDistrict());
+        model.addAttribute("houseCountInDistrict", result.getResult());
 
         return "house-detail";
     }
