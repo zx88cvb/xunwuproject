@@ -370,8 +370,14 @@ public class SearchServiceImpl implements ISearchService {
             );
         }
 
-        boolQueryBuilder.must(QueryBuilders.multiMatchQuery(rentSearch.getKeywords(),
-                HouseIndexKey.TITLE,
+        // 提升权重
+        boolQueryBuilder.should(
+                QueryBuilders.matchQuery(HouseIndexKey.TITLE, rentSearch.getKeywords())
+                        .boost(2L)
+        );
+
+        // must 必须满足 should非必须
+        boolQueryBuilder.should(QueryBuilders.multiMatchQuery(rentSearch.getKeywords(),
                 HouseIndexKey.TRAFFIC,
                 HouseIndexKey.DISTRICT,
                 HouseIndexKey.ROUND_SERVICE,
@@ -388,7 +394,9 @@ public class SearchServiceImpl implements ISearchService {
                         SortOrder.fromString(rentSearch.getOrderDirection())
                 )
                 .setFrom(rentSearch.getStart())
-                .setSize(rentSearch.getSize());
+                .setSize(rentSearch.getSize())
+                // 只返回houseId 提升效率
+                .setFetchSource(HouseIndexKey.HOUSE_ID, null);
 
         LOGGER.debug(searchRequestBuilder.toString());
 
