@@ -5,6 +5,7 @@ import com.imocc.base.ApiResponse;
 import com.imocc.base.RentValueBlock;
 import com.imocc.entity.SupportAddress;
 import com.imocc.service.*;
+import com.imocc.service.search.HouseBucketDTO;
 import com.imocc.service.search.ISearchService;
 import com.imocc.web.controller.form.RentSearch;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -182,5 +183,29 @@ public class HouseController {
         model.addAttribute("houseCountInDistrict", result.getResult());
 
         return "house-detail";
+    }
+
+    @GetMapping("rent/house/map")
+    public String rentMapPage(String cityEnName,
+                              Model model,
+                              HttpSession session,
+                              RedirectAttributes redirectAttributes) {
+        ServiceResult<SupportAddressDTO> serviceResult = iAddressService.findCity(cityEnName);
+
+        if (!serviceResult.isSuccess()) {
+            redirectAttributes.addAttribute("msg", "must_chose_city");
+            return "redirect:/index";
+        }
+        session.setAttribute("cityEnName", cityEnName);
+        model.addAttribute("city", serviceResult.getResult());
+
+        ServiceMultiResult<HouseBucketDTO> houseBucketDTOServiceMultiResult = iSearchService.mapAggregate(cityEnName);
+        ServiceMultiResult<SupportAddressDTO> regions = iAddressService.findAllRegionsByCityName(cityEnName);
+        model.addAttribute("aggData", houseBucketDTOServiceMultiResult.getResult());
+        model.addAttribute("total", houseBucketDTOServiceMultiResult.getTotal());
+        model.addAttribute("regions", regions.getResult());
+
+        return "rent-map";
+
     }
 }

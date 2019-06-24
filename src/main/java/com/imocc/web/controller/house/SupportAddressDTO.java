@@ -20,4 +20,8 @@ public class SupportAddressDTO {
     private String cnName;
 
     private String level;
+
+    private double baiduMapLongitude;
+
+    private double baiduMapLatitude;
 }

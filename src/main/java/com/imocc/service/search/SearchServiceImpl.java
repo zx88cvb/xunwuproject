@@ -26,14 +26,12 @@ import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.RangeQueryBuilder;
 import org.elasticsearch.index.reindex.BulkByScrollResponse;
 import org.elasticsearch.index.reindex.DeleteByQueryAction;
 import org.elasticsearch.index.reindex.DeleteByQueryRequestBuilder;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.search.aggregations.Aggregation;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
@@ -54,7 +52,6 @@ import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
@@ -486,6 +483,38 @@ public class SearchServiceImpl implements ISearchService {
         }
         LOGGER.warn("Failed to Addregate for "+ HouseIndexKey.AGG_DISTRICT);
         return ServiceResult.of(0L);
+    }
+
+    @Override
+    public ServiceMultiResult<HouseBucketDTO> mapAggregate(String cityEnName) {
+        BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+
+        boolQueryBuilder.filter(
+                QueryBuilders.termQuery(HouseIndexKey.CITY_EN_NAME, cityEnName)
+        );
+
+        AggregationBuilder aggregationBuilder = AggregationBuilders.terms(HouseIndexKey.AGG_REGION)
+                .field(HouseIndexKey.REGION_EN_NAME);
+
+        SearchRequestBuilder requestBuilder = this.transportClient.prepareSearch(INDEX_NAME)
+                .setTypes(INDEX_TYPE)
+                .setQuery(boolQueryBuilder)
+                .addAggregation(aggregationBuilder);
+
+        LOGGER.debug(requestBuilder.toString());
+
+        SearchResponse searchResponse = requestBuilder.get();
+        List<HouseBucketDTO> bucketDTOList = Lists.newArrayList();
+        if (searchResponse.status() != RestStatus.OK) {
+            LOGGER.warn("Aggregate status is not ok for " + requestBuilder);
+            return new ServiceMultiResult(0, bucketDTOList);
+        }
+
+        Terms terms = searchResponse.getAggregations().get(HouseIndexKey.AGG_REGION);
+        for (Terms.Bucket bucket: terms.getBuckets()) {
+            bucketDTOList.add(new HouseBucketDTO(bucket.getKeyAsString(), bucket.getDocCount()));
+        }
+        return new ServiceMultiResult<>(searchResponse.getHits().getTotalHits(), bucketDTOList);
     }
 
     private boolean updateSuggest(HouseIndexTemplate houseIndexTemplate){
