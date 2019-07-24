@@ -10,9 +10,12 @@ import com.imocc.base.RentValueBlock;
 import com.imocc.entity.House;
 import com.imocc.entity.HouseDetail;
 import com.imocc.entity.HouseTag;
+import com.imocc.entity.SupportAddress;
 import com.imocc.repository.HouseDetailRepository;
 import com.imocc.repository.HouseRepository;
 import com.imocc.repository.HouseTagRepository;
+import com.imocc.repository.SupportAddressRepository;
+import com.imocc.service.IAddressService;
 import com.imocc.service.ServiceMultiResult;
 import com.imocc.service.ServiceResult;
 import com.imocc.web.controller.form.RentSearch;
@@ -76,6 +79,12 @@ public class SearchServiceImpl implements ISearchService {
 
     @Resource
     private HouseTagRepository tagRepository;
+
+    @Resource
+    private SupportAddressRepository supportAddressRepository;
+
+    @Resource
+    private IAddressService iAddressService;
 
     @Resource
     private ModelMapper modelMapper;
@@ -158,6 +167,29 @@ public class SearchServiceImpl implements ISearchService {
         }
 
         modelMapper.map(houseDetail,houseIndexTemplate);
+
+        // 城市
+        SupportAddress city =
+                supportAddressRepository.findByEnNameAndLevel(house.getCityEnName(), SupportAddress.Level.CITY.getValue());
+
+//        地区
+        SupportAddress region = supportAddressRepository.findByEnNameAndLevel(house.getRegionEnName(), SupportAddress.Level.REGION.getValue());
+
+        String address = new StringBuilder()
+                .append(city.getCnName())
+                .append(region.getCnName())
+                .append(house.getStreet())
+                .append(house.getDistrict())
+                .append(houseDetail.getDetailAddress())
+                .toString();
+
+        ServiceResult<BaiduMapLocation> baiduMapLocation = iAddressService.getBaiduMapLocation(city.getCnName(), address);
+
+        if (!baiduMapLocation.isSuccess()) {
+            this.index(houseIndexMessage.getHouseId(), houseIndexMessage.getRetry() + 1);
+            return;
+        }
+        houseIndexTemplate.setLocation(baiduMapLocation.getResult());
 
         // 查询tag
         List<HouseTag> houseTagList = tagRepository.findAllByHouseId(houseId);

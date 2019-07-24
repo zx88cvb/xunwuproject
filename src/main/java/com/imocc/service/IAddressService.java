@@ -1,6 +1,7 @@
 package com.imocc.service;
 
 import com.imocc.entity.SupportAddress;
+import com.imocc.service.search.BaiduMapLocation;
 import com.imocc.web.controller.house.SubwayDTO;
 import com.imocc.web.controller.house.SubwayStationDTO;
 import com.imocc.web.controller.house.SupportAddressDTO;
@@ -49,4 +50,13 @@ public interface IAddressService {
      * @return
      */
     ServiceResult<SupportAddressDTO> findCity(String cityEnName);
+
+    /**
+     * 根据城市以及具体位置获取百度地图经纬度
+     * @param city 城市
+     * @param address 地址
+     * @return BaiduMapLocation
+     */
+    ServiceResult<BaiduMapLocation> getBaiduMapLocation(String city, String address);
+
 }
